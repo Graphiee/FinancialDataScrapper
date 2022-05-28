@@ -2,9 +2,8 @@ import requests
 from bs4 import BeautifulSoup
 
 class HtmlRetriver:
-
-    
     """Retrieves HTML content from provided website"""
+    
     def __init__(self):
         pass
 
@@ -34,3 +33,4 @@ class HtmlRetriver:
             self.code = self.code[0]
         
         return self.code
+        
