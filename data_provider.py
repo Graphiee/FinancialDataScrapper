@@ -3,24 +3,32 @@ from html_retriver import HtmlRetriver
 import pandas as pd
 import numpy as np
 import re
+from pandas_datareader.stooq import StooqDailyReader
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
 
 class FinancialIndicatorsProvider(HtmlRetriver):
     """Retrieves financial indicators from biznesradar.pl"""
 
 
-    def __init__(self, profile:str='KGHM', ticker:str='kgh'):
+    def __init__(self, profile:str='KGHM'):
         super().__init__()
         self.profile = profile
-        self.ticker = ticker
 
         html_links = [f'https://www.biznesradar.pl/wskazniki-wartosci-rynkowej/{profile},Q',
                       f'https://www.biznesradar.pl/wskazniki-rentownosci/{profile},Q',
                       f'https://www.biznesradar.pl/dywidenda/{profile}',
                       f'https://www.biznesradar.pl/rating/{profile}',
                       f'https://www.biznesradar.pl/raporty-finansowe-rachunek-zyskow-i-strat/{profile},Q',
-                      f'https://www.biznesradar.pl/operacje/{profile}']
+                      f'https://www.biznesradar.pl/operacje/{profile}',
+                      f'https://www.biznesradar.pl/notowania/{profile}']
 
         self.retrieve_html(html_links)
+        self.ticker = self._get_ticker()
+
+    def _get_ticker(self):
+        ticker = self.retrieve_html_content(attrs={'itemprop': 'tickerSymbol'}, limit=1)['content']
+        return ticker
 
     def _get_values(self, **kwargs):
         code1 = self.retrieve_html_content(attrs={'data-field': kwargs.get('data_field')}, limit=1)
@@ -153,8 +161,54 @@ class FinancialIndicatorsProvider(HtmlRetriver):
         return self._create_dataframe(self.price_values,
                                       self.quarters)
 
+    def _stringify_date(self, column:pd.Series):
+        """Takes datetime column, standardizes it and outputs a string representation"""
+        stringify_func = lambda x: re.sub('\D','-', x)
+        column = column.map(stringify_func)
+        column = column.astype(str)
+
+        return column
+
+    def _fill_numeric_column(self, column:pd.Series, fill_value:float=0):
+        """Fills missing values in numeric column"""
+        acceptable_types = ('float', 'int', 'np.float64', 'np.float32', 'np.float16', 'np.int64', 'np.int32', 'np.int16')
+        num_check_func = lambda x: fill_value if isinstance(x, acceptable_types) else fill_value
+        column = column.map(num_check_func)
+        column = column.astype(float)
+
+        return column
+
+    def daily_prices(self, *args, **kwargs):
+        """Returns daily closing prices"""
+        daily_prices = StooqDailyReader(symbols=f'{self.ticker}.PL', *args, **kwargs)
+        daily_prices = daily_prices.read().reset_index(drop=False)
+        daily_prices = daily_prices[['Date','Close']]
+
+        return daily_prices
+
     def dividend_yield(self):
-        dividend_table = pd.read_html(f'https://stooq.pl/q/m/?s={self.ticker}', attrs={'class': 'fth1', 'id':'fth1'})
+        """Calculated dividend yield by dividing price in day in """
+        dividend_table = pd.read_html(f'https://www.biznesradar.pl/dywidenda/KGHM')[0]
+        dividend_table['dzień wypłaty'] = dividend_table['dzień wypłaty'].map(lambda x: x.split(' ')[-1])
+        dividend_table['dzień wypłaty'] = self._stringify_date(column=dividend_table['dzień wypłaty'])
+
+
+        dividend_table['dzień wypłaty'] = dividend_table['dzień wypłaty'].map(lambda x: x.split(' ')[-1])
+        earliest_dividend_year = str(dividend_table['wypłata za rok'].iloc[-1])
+        daily_prices = self.daily_prices(start=earliest_dividend_year)
+        daily_prices['Date'] = daily_prices['Date'].astype('str')
+
+        dividend_table = pd.merge(dividend_table, daily_prices, how='left', left_on='dzień wypłaty', right_on='Date')
+        dividend_table.loc[0, 'Close'] = daily_prices['Close'].iloc[0]
+        dividend_table['łącznie dywidenda na akcję (zł)'] = dividend_table['łącznie dywidenda na akcję (zł)'].replace('-', 0)
+        dividend_table['łącznie dywidenda na akcję (zł)'] = dividend_table['łącznie dywidenda na akcję (zł)'].astype('float')
+        dividend_table['Close'] = dividend_table['Close'].astype(float)
+
+        dividend_table['stopa dywidendy*'] = 100 * (dividend_table['łącznie dywidenda na akcję (zł)'] / dividend_table['Close'])
+        dividend_table = dividend_table[['wypłata za rok', 'dzień wypłaty', 'stopa dywidendy*']]
+        dividend_table = dividend_table.rename(columns={'wypłata za rok': 'payout for year',
+                                                        'stopa dywidendy*': 'dividend yield',
+                                                        'dzień wypłaty': 'payout date'})
 
         return dividend_table
 
@@ -320,12 +374,5 @@ class FinancialIndicatorsProvider(HtmlRetriver):
 
         
 if __name__ == '__main__':
-    t = FinancialIndicatorsProvider('KGHM', 'kgh')
+    t = FinancialIndicatorsProvider('KGHM')
     t.dividend_yield()
-    
-    import requests
-    pd.read_html(requests.get('https://stooq.pl/q/m/?s=kgh').content, attrs={'id': 'f13'})
-
-
-import ssl
-ssl._create_default_https_context = ssl._create_unverified_context
