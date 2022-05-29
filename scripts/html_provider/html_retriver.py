@@ -1,6 +1,7 @@
 import requests 
 from bs4 import BeautifulSoup
 
+
 class HtmlRetriver:
     """Retrieves HTML content from provided website"""
     
@@ -13,7 +14,7 @@ class HtmlRetriver:
         """
         request_html = ''
         for link in html_links:
-            link_output = requests.get(link).content
+            link_output = requests.get(link, timeout=600).content
             request_html += str(link_output)
         self.html = BeautifulSoup(request_html, 'html.parser')
 

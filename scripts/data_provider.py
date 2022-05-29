@@ -1,17 +1,20 @@
-
+# %%
 from html_retriver import HtmlRetriver
 import pandas as pd
 import numpy as np
 import re
 from pandas_datareader.stooq import StooqDailyReader
 import ssl
-ssl._create_default_https_context = ssl._create_unverified_context
+import warnings
 
-class FinancialIndicatorsProvider(HtmlRetriver):
+class FinancialDataProvider(HtmlRetriver):
     """Retrieves financial indicators from biznesradar.pl"""
+    
+    ssl._create_default_https_context = ssl._create_unverified_context
 
 
-    def __init__(self, profile:str='KGHM'):
+    def __init__(self, profile:str):
+
         super().__init__()
         self.profile = profile
 
@@ -30,36 +33,59 @@ class FinancialIndicatorsProvider(HtmlRetriver):
         ticker = self.retrieve_html_content(attrs={'itemprop': 'tickerSymbol'}, limit=1)['content']
         return ticker
 
+    
     def _get_values(self, **kwargs):
-        code1 = self.retrieve_html_content(attrs={'data-field': kwargs.get('data_field')}, limit=1)
+        try:
+            code1 = self.retrieve_html_content(attrs={'data-field': kwargs.get('data_field')}, limit=1)
+        except RuntimeError:
+            warnings.warn(f'Provided indicator is not calculated for {self.profile}.')
+            return [None]
         code2 = code1.find_all(class_ = "h")
         get_value = lambda x: self.retrieve_html_content(class_='value', code=x)[0].get_text()
         values = list(map(lambda x: get_value(x) if len(x) else None, code2))
         return values
 
     def _get_sector_average_value(self, **kwargs):
-        code1 = self.retrieve_html_content(attrs={'data-field': kwargs.get('data_field')}, limit=1)
+        try:
+            code1 = self.retrieve_html_content(attrs={'data-field': kwargs.get('data_field')}, limit=1)
+        except RuntimeError:
+            warnings.warn(f'Provided indicator is not calculated for {self.profile}.')
+            return [None]
         code2 = code1.find_all(class_ = "h")
-        get_value = lambda x: self.retrieve_html_content(class_='sectorv', code=x)[0].get_text()
-        values = list(map(lambda x: get_value(x) if len(x) else None, code2))
+        get_value = lambda x: x.find_all(class_='sectorv', code=x)
+        values = list(map(get_value, code2))
+        values = list(map(lambda x: x[0].find_all(class_='pv')[0].get_text() if len(x) > 0 else None, values))
         return values
 
+
     def _get_year_to_year_change(self, **kwargs):
-        code1 = self.retrieve_html_content(attrs={'data-field': kwargs.get('data_field')}, limit=1)
-        code2 = self.retrieve_html_content(class_ = "h", code=code1)
+        try:
+            first_table = self.retrieve_html_content(attrs={'data-field': kwargs.get('data_field')}, limit=1)
+        except RuntimeError:
+            warnings.warn(f'Provided indicator is not calculated for {self.profile}.')
+            return [[None, None]]
+        code2 = first_table.find_all(class_ = "h")
         get_value = lambda x: self.retrieve_html_content(class_='changeyy', code=x)[0].get_text()
         values = list(map(lambda x: get_value(x) if len(x) and 'changeyy' in str(x) else None, code2))
-        values = list(map(lambda x: 'None~None' if x==None else x, values))
-        values = list(map(lambda x: x.split('~') if '~' in x else [None, None], values))
+        values = list(map(lambda x: re.sub('[^\d.+-]', ' ', x) if x else x, values))
+        values = list(map(lambda x: x.strip().split() if x else x, values))
+        values = list(map(lambda x: [None, None] if not x else x, values))
+
         return values
 
     def _get_quarter_to_quarter_change(self, **kwargs):
-        code1 = self.retrieve_html_content(attrs={'data-field': kwargs.get('data_field')}, limit=1)
+        try:
+            code1 = self.retrieve_html_content(attrs={'data-field': kwargs.get('data_field')}, limit=1)
+        except RuntimeError:
+            warnings.warn(f'Provided indicator is not calculated for {self.profile}.')
+            return [[None, None]]
         code2 = code1.find_all(class_ = "h")
         get_value = lambda x: self.retrieve_html_content(class_='changeqq', code=x)[0].get_text()
         values = list(map(lambda x: get_value(x) if len(x) and 'changeqq' in str(x) else None, code2))
-        values = list(map(lambda x: 'None~None' if x==None else x, values))
-        values = list(map(lambda x: x.split('~') if '~' in x else [None, None], values))
+        values = list(map(lambda x: re.sub('[^\d.+-]', ' ', x) if x else x, values))
+        values = list(map(lambda x: x.strip().split() if x else x, values))
+        values = list(map(lambda x: [None, None] if not x else x, values))
+
         return values
 
     def _get_time_itervals(self, **kwargs):
@@ -70,8 +96,12 @@ class FinancialIndicatorsProvider(HtmlRetriver):
 
 
     def _get_quarters(self, data_field:str=None):
-        first_table = self.retrieve_html_content(attrs={'data-field': data_field}, limit=1)
-        quarters_raw = first_table.parent.find_all(class_='thq')
+        try:
+            code1 = self.retrieve_html_content(attrs={'data-field': data_field}, limit=1)
+        except RuntimeError:
+            warnings.warn(f'Provided indicator is not calculated for {self.profile}.')
+            return [None]
+        quarters_raw = code1.parent.find_all(class_='thq')
         quarters_func = lambda x: x.get_text().replace('\\n','').replace('\\t','')
         quarters = list(map(lambda x: quarters_func(x), quarters_raw))
         return quarters
@@ -89,11 +119,6 @@ class FinancialIndicatorsProvider(HtmlRetriver):
         if filtered_value != None:
             return False
 
-    # def _args_remover(self, tuple_:tuple=None, value=None):
-    #     """Removes given element from a tuple"""
-    #     tuple_ = filter(~self._unambiguous_comparer, )
-
-    #     return tuple_
     
     def _create_dataframe(self, *args):
         args = list(filter(self._unambiguous_none_comparer, args))
@@ -108,6 +133,22 @@ class FinancialIndicatorsProvider(HtmlRetriver):
         list_ = list_.reshape((len(list_), list_.ndim))
 
         return list_
+
+    def _change_column_type(self, type_:type=None, df:pd.DataFrame=None):
+        """Changes the format of columns in the dataframe wherever it's possible."""
+        
+        for column in df.columns:
+            try:
+                df[column] = df[column].astype(type_)
+            except ValueError:
+                continue
+        
+        return df
+
+    def _destimulatize_variable(self, column:pd.Series):
+        """Stimulitizes/destimutalizes given column"""
+        return -column.astype(float)
+
 
     def net_profit(self, y2y_change:bool=True, q2q_change:bool=True):
         data_field = 'IncomeNetProfit'
@@ -132,6 +173,7 @@ class FinancialIndicatorsProvider(HtmlRetriver):
                                       self.y2y_change_values,
                                       self.q2q_change_values,
                                       self.quarters)
+    
     def shares(self):
         data_field = 'ShareAmount'
         class_ = 'h'
@@ -178,6 +220,42 @@ class FinancialIndicatorsProvider(HtmlRetriver):
 
         return column
 
+    def _replace_string(self, df:pd.DataFrame, to_replace:str, value:str):
+        """Replaces to_replace in strings inside all columns in value"""
+        for column in df.columns:
+            df[column] = df[column].map(lambda x: x.replace(to_replace, value) if isinstance(x, str) else x)
+        
+        return df
+
+    def _column_labeler(
+        self, 
+        indicator:str=None, 
+        sector_avg:bool=True, 
+        y2y_change:bool=True, 
+        q2q_change:bool=True, 
+        df:pd.DataFrame=None):
+
+        """Labels the columns based on boolean values passed inside"""
+
+        columns = [indicator,
+         f'sector avg {indicator}', 
+         f'y2y {indicator} (%)', 
+         f'y2y sector {indicator} (%)',
+         f'q2q {indicator} (%)', 
+         f'q2q sector {indicator} (%)',
+         'key'
+         ]
+
+        bool_filter = [True, sector_avg, y2y_change, y2y_change, q2q_change, q2q_change, True]
+        
+        columns = np.array(columns)
+        bool_filter = np.array(bool_filter)
+
+        columns = columns[bool_filter]
+        df.columns = columns
+
+        return df
+
     def daily_prices(self, *args, **kwargs):
         """Returns daily closing prices"""
         daily_prices = StooqDailyReader(symbols=f'{self.ticker}.PL', *args, **kwargs)
@@ -188,7 +266,12 @@ class FinancialIndicatorsProvider(HtmlRetriver):
 
     def dividend_yield(self):
         """Calculated dividend yield by dividing price in day in """
-        dividend_table = pd.read_html(f'https://www.biznesradar.pl/dywidenda/KGHM')[0]
+
+        if not self.retrieve_html_content(id='dividends', limit=1).find('table'):
+            warnings.warn(f"{self.profile} has not paid out any dividend. Returning none.")
+            return
+
+        dividend_table = pd.read_html(f'https://www.biznesradar.pl/dywidenda/{self.profile}')[0]
         dividend_table['dzień wypłaty'] = dividend_table['dzień wypłaty'].map(lambda x: x.split(' ')[-1])
         dividend_table['dzień wypłaty'] = self._stringify_date(column=dividend_table['dzień wypłaty'])
 
@@ -209,8 +292,13 @@ class FinancialIndicatorsProvider(HtmlRetriver):
         dividend_table = dividend_table.rename(columns={'wypłata za rok': 'payout for year',
                                                         'stopa dywidendy*': 'dividend yield',
                                                         'dzień wypłaty': 'payout date'})
+        
+
+        dividend_table = dividend_table.sort_values(by='payout for year', ascending=True)
 
         return dividend_table
+
+    
 
     def price_to_earnings(self, sector_avg:bool=True, y2y_change:bool=True, q2q_change:bool=True):
         data_field = 'CZ'
@@ -235,10 +323,22 @@ class FinancialIndicatorsProvider(HtmlRetriver):
         self.quarters = self._get_quarters(data_field=data_field)
         self.quarters = self._change_dimension(self.quarters)
 
-        return self._create_dataframe(self.price_to_earnings_values,
-                                      self.y2y_change_values,
-                                      self.q2q_change_values,
-                                      self.quarters)
+        df = self._create_dataframe(self.price_to_earnings_values,
+                                    self.sector_avg_values,
+                                    self.y2y_change_values,
+                                    self.q2q_change_values,
+                                    self.quarters)
+
+        df = self._column_labeler(
+            indicator='P/E', 
+            sector_avg=sector_avg, 
+            y2y_change=y2y_change, 
+            q2q_change=q2q_change, 
+            df=df)
+
+        df = self._change_column_type(type_=float, df=df)
+
+        return df
 
     def price_to_book_value(self, sector_avg:bool=True, y2y_change:bool=True, q2q_change:bool=True):
         data_field = 'CWK'
@@ -263,10 +363,23 @@ class FinancialIndicatorsProvider(HtmlRetriver):
         self.quarters = self._get_quarters(data_field=data_field)
         self.quarters = self._change_dimension(self.quarters)
 
-        return self._create_dataframe(self.price_to_book_value_values,
-                                      self.y2y_change_values,
-                                      self.q2q_change_values,
-                                      self.quarters)
+        df = self._create_dataframe(self.price_to_book_value_values,
+                                    self.sector_avg_values,
+                                    self.y2y_change_values,
+                                    self.q2q_change_values,
+                                    self.quarters)
+
+        df = self._column_labeler(
+            indicator='P/BV', 
+            sector_avg=sector_avg,
+            y2y_change=y2y_change,
+            q2q_change=q2q_change,
+            df=df)
+
+        df = self._change_column_type(type_=float, df=df)
+
+        return df
+
 
     def price_to_sales(self, sector_avg:bool=True, y2y_change:bool=True, q2q_change:bool=True):
         data_field = 'CP'
@@ -291,16 +404,28 @@ class FinancialIndicatorsProvider(HtmlRetriver):
         self.quarters = self._get_quarters(data_field=data_field)
         self.quarters = self._change_dimension(self.quarters)
 
-        return self._create_dataframe(self.price_to_sales_values,
-                                      self.y2y_change_values,
-                                      self.q2q_change_values,
-                                      self.quarters)
+        df =  self._create_dataframe(self.price_to_sales_values,
+                                    self.sector_avg_values,
+                                    self.y2y_change_values,
+                                    self.q2q_change_values,
+                                    self.quarters)
 
-    def roe(self, sector_avg:bool=True, y2y_change:bool=True, q2q_change:bool=True):
+        df = self._column_labeler(
+            indicator='P/S', 
+            sector_avg=sector_avg,
+            y2y_change=y2y_change,
+            q2q_change=q2q_change,
+            df=df)
+
+        df = self._change_column_type(type_=float, df=df)
+
+        return df
+
+    def roe(self, sector_avg:bool=True, y2y_change:bool=True, q2q_change:bool=True, opposite:bool=True):
         data_field = 'ROE'
         class_ = 'h'
 
-        self.roe_values =  self._get_values(data_field=data_field, class_=class_)
+        self.roe_values = self._get_values(data_field=data_field, class_=class_)
         self.roe_values = self._change_dimension(self.roe_values)
 
         self.sector_avg_values, self.y2y_change_values, self.q2q_change_values = None, None, None
@@ -319,23 +444,77 @@ class FinancialIndicatorsProvider(HtmlRetriver):
         self.quarters = self._get_quarters(data_field=data_field)
         self.quarters = self._change_dimension(self.quarters)
 
-        return self._create_dataframe(self.roe_values,
-                                      self.y2y_change_values,
-                                      self.q2q_change_values,
-                                      self.quarters)
+        df = self._create_dataframe(self.roe_values,
+                                    self.sector_avg_values,
+                                    self.y2y_change_values,
+                                    self.q2q_change_values,
+                                    self.quarters)
 
-    def piotroski_f_score(self):
-        piotroski_table = self.retrieve_html_content(class_ = "rating-table full")[1].find_all(class_ = "data") 
+
+        df = self._column_labeler(
+            indicator='ROE', 
+            sector_avg=sector_avg,
+            y2y_change=y2y_change,
+            q2q_change=q2q_change,
+            df=df)
+
+        df = self._replace_string(df=df, to_replace='%', value='')
+        df = self._change_column_type(type_=float, df=df)
+
+        if opposite:
+            df['ROE'] = self._destimulatize_variable(column=df['ROE'])
+
+        return df
+
+    def _piotroski_exception(self):
+        # latest_results_date = self.retrieve_html_content(class_='thq h newest', limit=1).get_text()
+        # latest_results_date = latest_results_date.replace('\\n','').replace('\\t','')
+        self.piotroski_f_score_table = pd.DataFrame({'key': [None], 
+        'grade': [None]})
+        warnings.warn(f"{self.profile} does not have calculated f score. Returning empty table")
+
+        return self.piotroski_f_score_table
+
+    def piotroski_f_score(self, detailed:bool=False, opposite:bool=True):
+
+        try:
+            piotroski_page_tables = self.retrieve_html_content(class_ = "rating-table full")
+        except:
+            return self._piotroski_exception()
+        
+        is_piotroski_calculated = any(list(map(lambda x: 'Piotroski' in str(x), piotroski_page_tables)))
+
+        if not is_piotroski_calculated:
+            return self._piotroski_exception()
+
+        piotroski_table = [x for x in piotroski_page_tables if 'Piotroski' in str(x)][0]
+        piotroski_table = piotroski_table.find_all(class_ = "data")
+
         piotroski_table_text = (list(map(lambda x: x.get_text(), piotroski_table)))
         piotroski_table_text = np.unique(piotroski_table_text)
-        regex_splitter = lambda x:re.split('\\\\n|\\\\t|poprzedni okres:[\s\d\.\%]+', x)
+        regex_splitter = lambda x:re.split('\\\\n|\\\\t|poprzedni okres:[-\s\d\.\%]+', x)
         splitted_text = list(map(regex_splitter, piotroski_table_text))
         clean_empty_strings_filter = lambda x: list(filter(None, x))
         empty_strings_removed = list(map(clean_empty_strings_filter, splitted_text))
         
         self.piotroski_f_score_table = pd.DataFrame(empty_strings_removed)
-        self.piotroski_f_score_value = self.piotroski_f_score_table[self.piotroski_f_score_table.columns[-1]].astype(int).sum()
-        print('F-SCORE = ', self.piotroski_f_score_value)
+        self.piotroski_f_score_table.columns = ['wskaźnik', 'wartość', 'grade']
+        
+        if detailed:
+            self.piotroski_f_score_value = self.piotroski_f_score_table[self.piotroski_f_score_table.columns[-1]].astype(int).sum()
+            print('F-SCORE = ', self.piotroski_f_score_value)
+            if opposite:
+                self.piotroski_f_score_table['grade'] = self._destimulatize_variable(column=self.piotroski_f_score_table['grade'])
+                
+            return self.piotroski_f_score_table
+
+        latest_results_date = self.retrieve_html_content(class_='thq h newest', limit=1).get_text()
+        latest_results_date = latest_results_date.replace('\\n','').replace('\\t','')
+        self.piotroski_f_score_table = pd.DataFrame({'key': [latest_results_date], 
+        'grade': [self.piotroski_f_score_table['grade'].astype(int).sum()]})
+        
+        if opposite:
+            self.piotroski_f_score_table['grade'] = self._destimulatize_variable(column=self.piotroski_f_score_table['grade'])
 
         return self.piotroski_f_score_table
 
@@ -374,5 +553,6 @@ class FinancialIndicatorsProvider(HtmlRetriver):
 
         
 if __name__ == '__main__':
-    t = FinancialIndicatorsProvider('KGHM')
-    t.dividend_yield()
+    t = FinancialDataProvider('KGHM')
+    p = t.piotroski_f_score(detailed=True, opposite=True)
+    p
