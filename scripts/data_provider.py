@@ -147,8 +147,9 @@ class FinancialDataProvider(HtmlRetriver):
 
     def _destimulatize_variable(self, column:pd.Series):
         """Stimulitizes/destimutalizes given column"""
-        return -column.astype(float)
-
+        column = column.astype(str).map(lambda x: x.replace(' ',''))
+        column = -column.astype(float)
+        return column
 
     def net_profit(self, y2y_change:bool=True, q2q_change:bool=True):
         data_field = 'IncomeNetProfit'
@@ -421,7 +422,7 @@ class FinancialDataProvider(HtmlRetriver):
 
         return df
 
-    def roe(self, sector_avg:bool=True, y2y_change:bool=True, q2q_change:bool=True, opposite:bool=True):
+    def roe(self, sector_avg:bool=True, y2y_change:bool=True, q2q_change:bool=True, opposite:bool=False):
         data_field = 'ROE'
         class_ = 'h'
 
@@ -475,7 +476,7 @@ class FinancialDataProvider(HtmlRetriver):
 
         return self.piotroski_f_score_table
 
-    def piotroski_f_score(self, detailed:bool=False, opposite:bool=True):
+    def piotroski_f_score(self, detailed:bool=False, opposite:bool=False):
 
         try:
             piotroski_page_tables = self.retrieve_html_content(class_ = "rating-table full")
@@ -505,7 +506,7 @@ class FinancialDataProvider(HtmlRetriver):
             print('F-SCORE = ', self.piotroski_f_score_value)
             if opposite:
                 self.piotroski_f_score_table['grade'] = self._destimulatize_variable(column=self.piotroski_f_score_table['grade'])
-                
+
             return self.piotroski_f_score_table
 
         latest_results_date = self.retrieve_html_content(class_='thq h newest', limit=1).get_text()
@@ -553,6 +554,6 @@ class FinancialDataProvider(HtmlRetriver):
 
         
 if __name__ == '__main__':
-    t = FinancialDataProvider('KGHM')
-    p = t.piotroski_f_score(detailed=True, opposite=True)
+    t = FinancialDataProvider('ERH')
+    p = t.roe(opposite=True)
     p
