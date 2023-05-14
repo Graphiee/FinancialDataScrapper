@@ -1,4 +1,3 @@
-# %%
 from html_retriver import HtmlRetriver
 import pandas as pd
 import numpy as np
@@ -468,8 +467,6 @@ class FinancialDataProvider(HtmlRetriver):
         return df
 
     def _piotroski_exception(self):
-        # latest_results_date = self.retrieve_html_content(class_='thq h newest', limit=1).get_text()
-        # latest_results_date = latest_results_date.replace('\\n','').replace('\\t','')
         self.piotroski_f_score_table = pd.DataFrame({'key': [None], 
         'grade': [None]})
         warnings.warn(f"{self.profile} does not have calculated f score. Returning empty table")
@@ -556,4 +553,3 @@ class FinancialDataProvider(HtmlRetriver):
 if __name__ == '__main__':
     t = FinancialDataProvider('ERH')
     p = t.roe(opposite=True)
-    p
