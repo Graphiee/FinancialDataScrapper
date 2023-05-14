@@ -4,7 +4,7 @@
 
 The program retrieves the data about financial indicators and dividends of all companies from both Warsaw Stock Exchange as well as New Connect.
 
-Currently the program supports standard OHCL price informations and the following financial indicators:
+Currently, the program supports following financial indicators:
 
 - P/E
 - ROE
