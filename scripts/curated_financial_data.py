@@ -1,9 +1,10 @@
-# %%
+from datetime import datetime
 from data_provider import FinancialDataProvider
 from html_retriver import HtmlRetriver
 import pandas as pd
 from datetime import datetime
 from sklearn.preprocessing import *
+import os
 
 class CuratedFinancialData(FinancialDataProvider):
     """Retrieves financial data for a given period for companies provided"""
@@ -84,9 +85,11 @@ class CuratedFinancialData(FinancialDataProvider):
         return self.companies_dividends
 
     def get_csv_data(self, path:str):
-        current_date = datetime.now().strftime('%Y%m%d')
-        self.companies_indicators.to_csv(f'{path}/indicators_{current_date}.csv')
-        self.companies_dividends.to_csv(f'{path}/dividends_{current_date}.csv')
+        current_date = datetime.now().strftime('%Y-%m-%d')
+        indicators_path = os.path.join(path, f'/indicators_{current_date}.csv')
+        dividends_path = os.path.join(path, f'/dividends_{current_date}.csv')
+        self.companies_indicators.to_csv(indicators_path)
+        self.companies_dividends.to_csv(dividends_path)
 
 class PolishStockMarketCompanies(HtmlRetriver):
 
@@ -132,9 +135,9 @@ if __name__ == '__main__':
     profiles_getter = PolishStockMarketCompanies()
     profiles = profiles_getter.get_profiles()
 
+    current_date = datetime.now().strftime('%Y-%m-%d')
     cfd = CuratedFinancialData(companies=profiles, indicators=indicators)
     indicators = cfd.get(sector_change=False, y2y_change=False, q2q_change=False, period='latest', total_score=True)
-    indicators.to_csv('/Users/dominikmiskiewicz/Desktop/results/indicators.csv')
+    indicators.to_csv(f'../results/indicators_{current_date}.csv')
     dividends = cfd.get_dividends(period='latest')
-
-    cfd.get_csv_data('/Users/dominikmiskiewicz/Desktop/results')
+    cfd.companies_dividends.to_csv(f'../results/dividends_{current_date}.csv')
