@@ -29,16 +29,38 @@ class CuratedFinancialData(FinancialDataProvider):
         kwargs = self._get_indicator_kwargs(**kwargs)
         self.companies_indicators = pd.DataFrame()
         for company in self.companies:
+            current_date = datetime.now().strftime('%Y-%m-%d')
+            file_path = f'../results/indicators_{current_date}.csv'
+            if os.path.exists(file_path):
+                existing_data = pd.read_csv(file_path)
+                if company in existing_data['company'].values:
+                    print(f"Data for {company} already exists. Skipping...")
+                    continue
+
             print(company, self.companies.index(company))
-            f_data = FinancialDataProvider(profile=company)
-            for indicator_name, indicator in self.indicators:
+            success = False
+            attempts = 0
+            while not success and attempts < 10:
+                try:
+                    f_data = FinancialDataProvider(profile=company)
+                    success = True
+                except ConnectionError:
+                    attempts += 1
+                    if attempts == 10:
+                        raise ConnectionError(f"Failed to retrieve data for {company} after 10 attempts.")
+            
+            if not self.indicators:
+                raise ValueError("No indicators provided.")
+            for indicator_tuple in self.indicators:
+                if len(indicator_tuple) != 2:
+                    raise ValueError("Indicator must be a tuple of (indicator_name, indicator_function).")
+                indicator_name, indicator = indicator_tuple
                 if indicator == 'piotroski_f_score':
                     vars()[indicator_name + '_' + company] = getattr(f_data, indicator)()
                     continue
 
-                vars()[indicator_name + '_' + company] = getattr(f_data, indicator)(kwargs.get('sector_change') ,kwargs.get('q2q_change'), kwargs.get('y2y_change'))
+                vars()[indicator_name + '_' + company] = getattr(f_data, indicator)(kwargs.get('sector_change'), kwargs.get('q2q_change'), kwargs.get('y2y_change'))
 
-    
             vars()[company] = vars()[self.indicators[0][0] + '_' + company]
             for indicator_name, _ in self.indicators[1:]:
                 # In case when f score is not calculated
@@ -51,16 +73,20 @@ class CuratedFinancialData(FinancialDataProvider):
             elif isinstance(kwargs.get('period'), int):
                 vars()[company] = vars()[company][vars()[company]['key'].map(lambda x: int(x[:4]) >= kwargs.get('period'))]
 
-                
-
             vars()[company]['company'] = company
 
-            self.companies_indicators = pd.concat([self.companies_indicators, vars()[company]], axis=0)
+            self.companies_indicators = vars()[company].copy()
         
+
+            current_date = datetime.now().strftime('%Y-%m-%d')
+            if not os.path.exists(f'../results/indicators_{current_date}.csv'):
+                self.companies_indicators.to_csv(f'../results/indicators_{current_date}.csv', index=False)
+            else:
+                self.companies_indicators.to_csv(f'../results/indicators_{current_date}.csv', mode='a', header=False, index=False)
+
         if kwargs.get('total_score'):
             self.companies_indicators['score'] = self.companies_indicators.select_dtypes([float, int]).sum(axis=1)
 
-        self.companies_indicators = self.companies_indicators.reset_index(drop=True)
         return self.companies_indicators
 
     
@@ -133,7 +159,7 @@ if __name__ == '__main__':
     ('piotroski_f_score', 'piotroski_f_score')]
     
     profiles_getter = PolishStockMarketCompanies()
-    profiles = profiles_getter.get_profiles()
+    profiles = profiles_getter.get_profiles()[:3]
 
     current_date = datetime.now().strftime('%Y-%m-%d')
     cfd = CuratedFinancialData(companies=profiles, indicators=indicators)
