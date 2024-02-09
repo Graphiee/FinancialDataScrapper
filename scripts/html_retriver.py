@@ -14,12 +14,24 @@ class HtmlRetriver:
         """
         request_html = ''
         for link in html_links:
-            try:
-                link_output = requests.get(link, timeout=600).content
-            except TimeoutError:
-                time.sleep(300)
-                link_output = requests.get(link, timeout=600).content
-
+            status_code = 0 
+            ignore = False
+            backoff = 1
+            while (status_code not in range(200, 300)) and (not ignore):
+                try:
+                    response = requests.get(link)
+                    status_code = response.status_code
+                    link_output = response.content
+                    if status_code not in range(200,300):
+                        time.sleep(backoff)
+                        backoff *= 2
+                        ignore = True if backoff >= 32 else False
+                    if ignore:
+                        break
+                except:
+                    continue
+            if ignore:
+                continue
             request_html += str(link_output)
         self.html = BeautifulSoup(request_html, 'html.parser')
 

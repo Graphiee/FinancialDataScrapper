@@ -44,7 +44,7 @@ class CuratedFinancialData(FinancialDataProvider):
                 try:
                     f_data = FinancialDataProvider(profile=company)
                     success = True
-                except ConnectionError:
+                except:
                     attempts += 1
                     if attempts == 10:
                         raise ConnectionError(f"Failed to retrieve data for {company} after 10 attempts.")
@@ -159,11 +159,10 @@ if __name__ == '__main__':
     ('piotroski_f_score', 'piotroski_f_score')]
     
     profiles_getter = PolishStockMarketCompanies()
-    profiles = profiles_getter.get_profiles()[:3]
+    profiles = profiles_getter.get_profiles()
 
     current_date = datetime.now().strftime('%Y-%m-%d')
     cfd = CuratedFinancialData(companies=profiles, indicators=indicators)
     indicators = cfd.get(sector_change=False, y2y_change=False, q2q_change=False, period='latest', total_score=True)
-    indicators.to_csv(f'../results/indicators_{current_date}.csv')
     dividends = cfd.get_dividends(period='latest')
     cfd.companies_dividends.to_csv(f'../results/dividends_{current_date}.csv')
